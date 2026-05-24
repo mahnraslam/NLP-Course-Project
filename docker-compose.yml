@@ -1,0 +1,17 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/storage:/app/storage
+    env_file:
+      - ./backend/.env
+    restart: unless-stopped
+
+  # ChromaDB is embedded (PersistentClient) — no separate service needed.
+  # If you want a standalone Chroma server later, add it here.

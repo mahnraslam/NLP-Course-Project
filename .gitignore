@@ -1,1 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+*.egg
+
+# Environment
 .env
+.env.local
+
+# Node
+node_modules/
+dist/
+
+# Storage (runtime data)
+storage/uploads/
+storage/pages/
+storage/chroma_db/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.zip
+*.tar.gz
+
+# Test artifacts
+backend/tests/test_pdfs/
+/tmp/

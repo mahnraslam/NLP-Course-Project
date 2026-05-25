@@ -1,77 +1,81 @@
 import os
+import logging
 import pdfplumber
 from pdf2image import convert_from_path
-from services.gemini import describe_blueprint_page
 from dotenv import load_dotenv
 
 load_dotenv()
 
-PAGES_PATH  = os.getenv("PAGES_PATH",  "storage/pages")
-UPLOAD_PATH = os.getenv("UPLOAD_PATH", "storage/uploads")
+logger = logging.getLogger(__name__)
 
-# Pages with fewer characters than this are treated as drawing-heavy
-# and get vision enrichment via Gemini
-_VISION_THRESHOLD = 200
+PAGES_DIR  = os.getenv("PAGES_PATH", "storage/pages")
+CHUNK_SIZE = 1500
+CHUNK_OVERLAP = 100
+VISION_THRESHOLD = 200  # chars — pages below this get Gemini Vision enrichment
+
+os.makedirs(PAGES_DIR, exist_ok=True)
 
 
-def parse_pdf(file_path: str, doc_id: str) -> tuple[list[dict], int]:
+def _chunk_text(text: str, page: int, doc_id: str) -> list[dict]:
+    """Split a page's text into overlapping chunks of ~CHUNK_SIZE characters."""
+    text = text.strip()
+    if not text:
+        return []
+    if len(text) <= CHUNK_SIZE:
+        return [{"doc_id": doc_id, "page": page, "text": text}]
+
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = start + CHUNK_SIZE
+        chunk_text = text[start:end]
+        if chunk_text.strip():
+            chunks.append({"doc_id": doc_id, "page": page, "text": chunk_text})
+        start += CHUNK_SIZE - CHUNK_OVERLAP
+    return chunks
+
+
+def parse(pdf_path: str, doc_id: str) -> tuple[list[dict], int]:
     """
-    Parse a PDF into chunks suitable for embedding.
-
-    Returns:
-        chunks  — list of {text, page} dicts
-        page_count — total pages in the PDF
-
-    Each chunk is a page-level text block (≤ 1500 chars).
-    Drawing-heavy pages (text < _VISION_THRESHOLD chars) get Gemini vision
-    description appended so blueprint content is searchable.
+    Extract text chunks per page, apply Vision enrichment for drawing-heavy
+    pages, save page images. Returns (chunks, page_count).
     """
-    doc_pages_dir = os.path.join(PAGES_PATH, doc_id)
-    os.makedirs(doc_pages_dir, exist_ok=True)
-
-    pages_text = []
-
-    # ── 1. Extract text per page ──────────────────────────────────────────
-    with pdfplumber.open(file_path) as pdf:
+    chunks = []
+    with pdfplumber.open(pdf_path) as pdf:
         page_count = len(pdf.pages)
         for i, page in enumerate(pdf.pages):
-            text = (page.extract_text() or "").strip()
-            pages_text.append({"page_num": i + 1, "text": text, "image_path": None})
+            text = page.extract_text() or ""
 
-    # ── 2. Render pages as PNG (for blueprint viewer + vision) ────────────
+            # Vision enrichment for drawing-heavy pages (< 200 chars of text)
+            if len(text.strip()) < VISION_THRESHOLD:
+                try:
+                    from services.gemini import describe_blueprint_page
+                    # Save page image first so vision can use it
+                    page_images = convert_from_path(
+                        pdf_path, first_page=i + 1, last_page=i + 1
+                    )
+                    if page_images:
+                        img_path = os.path.join(PAGES_DIR, f"{doc_id}_page_{i + 1}.png")
+                        page_images[0].save(img_path, "PNG")
+                        vision_text = describe_blueprint_page(img_path)
+                        if vision_text:
+                            text = text + "\n\n[VISION ANALYSIS]\n" + vision_text
+                            logger.info(f"[pdf_parser] Vision enriched page {i+1} for {doc_id}")
+                except Exception as e:
+                    logger.warning(f"[pdf_parser] Vision failed for page {i+1}: {e}")
+
+            # Chunk the text
+            page_chunks = _chunk_text(text, i + 1, doc_id)
+            chunks.extend(page_chunks)
+
+    # Save all page images (some may already exist from vision step)
     try:
-        images = convert_from_path(file_path, dpi=150)
+        images = convert_from_path(pdf_path)
         for i, img in enumerate(images):
-            img_path = os.path.join(doc_pages_dir, f"page_{i + 1}.png")
-            img.save(img_path, "PNG")
-            if i < len(pages_text):
-                pages_text[i]["image_path"] = img_path
+            img_path = os.path.join(PAGES_DIR, f"{doc_id}_page_{i + 1}.png")
+            if not os.path.exists(img_path):  # skip if vision already saved it
+                img.save(img_path, "PNG")
     except Exception as e:
-        print(f"[pdf_parser] Image render failed (poppler missing?): {e}")
-
-    # ── 3. Vision enrichment for drawing-heavy pages ──────────────────────
-    for page in pages_text:
-        if len(page["text"]) < _VISION_THRESHOLD and page["image_path"]:
-            print(f"[pdf_parser] Vision enriching page {page['page_num']}…")
-            vision_text = describe_blueprint_page(page["image_path"])
-            if vision_text:
-                page["text"] += f"\n[VISUAL CONTENT — ENGINEERING DRAWING]:\n{vision_text}"
-
-    # ── 4. Chunk each page (split long pages into ≤ 1500-char chunks) ─────
-    chunks = []
-    for page in pages_text:
-        text = page["text"].strip()
-        if not text:
-            continue
-        # Split into ~1500-char chunks with 100-char overlap
-        step = 1400
-        if len(text) <= 1500:
-            chunks.append({"text": text, "page": page["page_num"]})
-        else:
-            start = 0
-            while start < len(text):
-                chunk_text = text[start: start + 1500]
-                chunks.append({"text": chunk_text, "page": page["page_num"]})
-                start += step
+        logger.warning(f"[pdf_parser] Page image rendering failed: {e}")
 
     return chunks, page_count

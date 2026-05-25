@@ -7,6 +7,7 @@ class DocumentMeta(BaseModel):
     filename: str
     page_count: int = 0
     chunk_count: int = 0
+    doc_type: str = "other"
 
 class DeleteResponse(BaseModel):
     doc_id: str
@@ -51,5 +52,12 @@ class ConflictItem(BaseModel):
 class ConflictResponse(BaseModel):
     doc_id_a: str
     doc_id_b: str
+    conflicts: List[ConflictItem]
+    total: int
+
+class AllConflictsRequest(BaseModel):
+    doc_ids: List[str]
+
+class AllConflictsResponse(BaseModel):
     conflicts: List[ConflictItem]
     total: int

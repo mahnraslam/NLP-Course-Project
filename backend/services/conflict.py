@@ -3,9 +3,6 @@ from services import embedder, vector_store
 from services.gemini import generate_json
 from models.schemas import ConflictItem, ConflictResponse
 
-# Construction conflict topics to check between two documents.
-# Each topic is embedded and used to retrieve relevant chunks from both docs.
-# Maximum 10 LLM calls total — one per topic (not O(n²) brute force).
 _TOPICS = [
     "slab thickness concrete grade strength",
     "rebar size diameter spacing reinforcement",
@@ -18,6 +15,36 @@ _TOPICS = [
     "structural load capacity bearing",
     "foundation footing depth dimension",
 ]
+
+CONFLICT_PAIRS = [
+    ("blueprint", "specification"),
+    ("blueprint", "submittal"),
+    ("specification", "submittal"),
+]
+
+
+def _get_docs_by_type(doc_ids: list[str]) -> dict[str, list[dict]]:
+    """Group doc metadata by doc_type for the given doc_ids."""
+    all_docs = vector_store.list_documents()
+    by_type: dict[str, list[dict]] = {}
+    id_set = set(doc_ids)
+    for doc in all_docs:
+        if doc.doc_id not in id_set:
+            continue
+        by_type.setdefault(doc.doc_type, []).append({"doc_id": doc.doc_id, "filename": doc.filename})
+    return by_type
+
+
+def detect_all_conflicts(project_doc_ids: list[str]) -> list[ConflictItem]:
+    """Auto-run conflicts across all meaningful doc type pairs in a project."""
+    docs_by_type = _get_docs_by_type(project_doc_ids)
+    conflicts: list[ConflictItem] = []
+    for type_a, type_b in CONFLICT_PAIRS:
+        for doc_a in docs_by_type.get(type_a, []):
+            for doc_b in docs_by_type.get(type_b, []):
+                result = detect(doc_a["doc_id"], doc_b["doc_id"], doc_a["filename"], doc_b["filename"])
+                conflicts.extend(result.conflicts)
+    return conflicts
 
 
 def detect(doc_id_a: str, doc_id_b: str, filename_a: str, filename_b: str) -> ConflictResponse:
@@ -65,13 +92,6 @@ Respond with ONLY: {{"conflict": false}}
 Do not add any text outside the JSON."""
 
         raw = generate_json(prompt).strip()
-
-        # Strip markdown code fences if Gemini wraps it
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        raw = raw.strip()
 
         try:
             result = json.loads(raw)

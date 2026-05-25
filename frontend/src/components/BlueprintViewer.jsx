@@ -1,79 +1,82 @@
-import { useState, useEffect } from 'react'
-import { getPageUrl } from '../api/client'
+import { useState } from 'react'
 
 const S = {
-  wrap:    { display: 'flex', flexDirection: 'column', height: '100%', background: '#060e1a' },
-  toolbar: { display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px',
-             background: '#0f1b2d', borderBottom: '1px solid #1e3a5f', flexShrink: 0 },
-  title:   { fontSize: 12, fontWeight: 600, color: '#94a3b8', flex: 1 },
-  navBtn:  (disabled) => ({
-    padding: '5px 12px', background: disabled ? '#1a2744' : '#1e3a5f',
-    border: '1px solid #2563eb', borderRadius: 6, color: disabled ? '#374151' : '#e2e8f0',
-    cursor: disabled ? 'not-allowed' : 'pointer', fontSize: 13,
+  wrap:    { flex: 1, display: 'flex', flexDirection: 'column', height: '100%',
+             background: '#0a1628', overflow: 'hidden' },
+  toolbar: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12,
+             padding: '10px 16px', borderBottom: '1px solid #1e3a5f', background: '#0f1b2d',
+             flexShrink: 0 },
+  btn:     (disabled) => ({
+    padding: '6px 16px', borderRadius: 6, border: '1px solid #1e3a5f',
+    background: disabled ? '#0a1628' : '#1e3a5f',
+    color: disabled ? '#374151' : '#e2e8f0', fontSize: 12, fontWeight: 600,
+    cursor: disabled ? 'not-allowed' : 'pointer', transition: 'all 0.15s',
   }),
-  pageNum: { fontSize: 13, color: '#60a5fa', fontWeight: 700, minWidth: 70, textAlign: 'center' },
-  viewer:  { flex: 1, overflowY: 'auto', display: 'flex', alignItems: 'flex-start',
-             justifyContent: 'center', padding: 20 },
-  img:     { maxWidth: '100%', borderRadius: 6, boxShadow: '0 4px 24px rgba(0,0,0,0.6)',
-             border: '1px solid #1e3a5f' },
+  pageInfo:{ fontSize: 13, fontWeight: 600, color: '#94a3b8', minWidth: 120, textAlign: 'center' },
+  imgWrap: { flex: 1, overflow: 'auto', display: 'flex', justifyContent: 'center',
+             alignItems: 'flex-start', padding: 16 },
+  img:     { maxWidth: '100%', borderRadius: 6, border: '1px solid #1e3a5f',
+             boxShadow: '0 4px 24px rgba(0,0,0,0.4)' },
   empty:   { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center',
              justifyContent: 'center', gap: 10, color: '#4a5568' },
-  emIcon:  { fontSize: 48 },
-  emText:  { fontSize: 13, color: '#6b7a99' },
-  badge:   { padding: '3px 8px', background: '#1e3a5f', borderRadius: 4,
-             fontSize: 11, color: '#60a5fa', border: '1px solid #2563eb' },
+  emIcon:  { fontSize: 40 },
+  emTitle: { fontSize: 15, fontWeight: 600, color: '#6b7a99' },
+  emSub:   { fontSize: 12, color: '#374151', textAlign: 'center', maxWidth: 300 },
+  errMsg:  { textAlign: 'center', padding: 32, color: '#f87171', fontSize: 13 },
 }
 
-export default function BlueprintViewer({ docId, page, pageCount, onPageChange }) {
-  const [imgSrc,   setImgSrc]   = useState(null)
+export default function BlueprintViewer({ docId, page = 1, pageCount, onPageChange }) {
   const [imgError, setImgError] = useState(false)
-  const [loading,  setLoading]  = useState(false)
 
-  useEffect(() => {
-    if (!docId) { setImgSrc(null); return }
-    setLoading(true)
-    setImgError(false)
-    const url = getPageUrl(docId, page)
-    setImgSrc(url)
-  }, [docId, page])
+  if (!docId) {
+    return (
+      <div style={S.empty}>
+        <div style={S.emIcon}>📐</div>
+        <div style={S.emTitle}>No document selected</div>
+        <div style={S.emSub}>Select a document from the sidebar to view its blueprint pages.</div>
+      </div>
+    )
+  }
 
-  const canPrev = page > 1
-  const canNext = pageCount ? page < pageCount : !imgError
-
-  if (!docId) return (
-    <div style={{ ...S.wrap, ...S.empty }}>
-      <div style={S.emIcon}>📐</div>
-      <div style={S.emText}>Select a document and click a citation page to view here</div>
-    </div>
-  )
+  // PNG pages served from backend at /pages/{docId}_page_{n}.png
+  const imgUrl = `/pages/${docId}_page_${page}.png`
+  const maxPage = pageCount || 1
 
   return (
     <div style={S.wrap}>
       <div style={S.toolbar}>
-        <span style={S.title}>Blueprint Viewer</span>
-        {imgError && <span style={S.badge}>⚠ Image not available — text-only doc</span>}
-        <button style={S.navBtn(!canPrev)} disabled={!canPrev} onClick={() => onPageChange(page - 1)}>◀</button>
-        <span style={S.pageNum}>Page {page}{pageCount ? ` / ${pageCount}` : ''}</span>
-        <button style={S.navBtn(!canNext)} disabled={!canNext} onClick={() => onPageChange(page + 1)}>▶</button>
+        <button
+          style={S.btn(page <= 1)}
+          onClick={() => onPageChange?.(Math.max(1, page - 1))}
+          disabled={page <= 1}
+        >
+          ← Prev
+        </button>
+        <span style={S.pageInfo}>Page {page} of {maxPage}</span>
+        <button
+          style={S.btn(page >= maxPage)}
+          onClick={() => onPageChange?.(Math.min(maxPage, page + 1))}
+          disabled={page >= maxPage}
+        >
+          Next →
+        </button>
       </div>
 
-      <div style={S.viewer}>
-        {loading && !imgError && <div style={S.emText}>Loading page…</div>}
-        {imgSrc && !imgError && (
-          <img
-            src={imgSrc}
-            alt={`Page ${page}`}
-            style={{ ...S.img, display: loading ? 'none' : 'block' }}
-            onLoad={() => setLoading(false)}
-            onError={() => { setImgError(true); setLoading(false) }}
-          />
-        )}
-        {imgError && (
-          <div style={{ ...S.empty, flex: 'none', paddingTop: 60 }}>
-            <div style={S.emIcon}>📄</div>
-            <div style={S.emText}>No rendered image for page {page}.<br/>
-              This may be a text-only document or poppler is not installed.</div>
+      <div style={S.imgWrap}>
+        {imgError ? (
+          <div style={S.errMsg}>
+            ⚠ Page image not found.<br />
+            This page may not have been rendered during upload.
           </div>
+        ) : (
+          <img
+            src={imgUrl}
+            alt={`Blueprint page ${page}`}
+            style={S.img}
+            onError={() => setImgError(true)}
+            onLoad={() => setImgError(false)}
+            key={`${docId}_${page}`}
+          />
         )}
       </div>
     </div>

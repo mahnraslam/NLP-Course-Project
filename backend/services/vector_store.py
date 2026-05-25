@@ -10,7 +10,7 @@ _client = chromadb.PersistentClient(path=_CHROMA_PATH)
 _col    = _client.get_or_create_collection("documents", metadata={"hnsw:space": "cosine"})
 
 
-def add(chunks: list[dict], embeddings: list[list[float]], doc_id: str, filename: str):
+def add(chunks: list[dict], embeddings: list[list[float]], doc_id: str, filename: str, doc_type: str = "other"):
     """
     Store chunks in ChromaDB.
     Chunk IDs use index suffix to avoid collision when multiple chunks share a page.
@@ -18,7 +18,7 @@ def add(chunks: list[dict], embeddings: list[list[float]], doc_id: str, filename
     ids       = [f"{doc_id}_p{c['page']}_c{i}" for i, c in enumerate(chunks)]
     documents = [c["text"] for c in chunks]
     metadatas = [
-        {"doc_id": doc_id, "filename": filename, "page": c["page"]}
+        {"doc_id": doc_id, "filename": filename, "page": c["page"], "doc_type": doc_type}
         for c in chunks
     ]
     _col.add(ids=ids, embeddings=embeddings, documents=documents, metadatas=metadatas)
@@ -30,10 +30,14 @@ def query(
     n: int = 5,
 ) -> list[dict]:
     """Retrieve top-n chunks closest to the query embedding."""
+    count = _col.count()
+    if count == 0:
+        return []
+    actual_n = min(n, count)
     where = {"doc_id": {"$in": doc_ids}} if doc_ids else None
     results = _col.query(
         query_embeddings=[embedding],
-        n_results=n,
+        n_results=actual_n,
         where=where,
         include=["documents", "metadatas", "distances"],
     )
@@ -60,7 +64,7 @@ def list_documents() -> list[DocumentMeta]:
     for m in all_meta:
         did = m["doc_id"]
         if did not in doc_map:
-            doc_map[did] = {"filename": m["filename"], "pages": set(), "chunks": 0}
+            doc_map[did] = {"filename": m["filename"], "pages": set(), "chunks": 0, "doc_type": m.get("doc_type", "other")}
         doc_map[did]["pages"].add(m["page"])
         doc_map[did]["chunks"] += 1
 
@@ -70,6 +74,7 @@ def list_documents() -> list[DocumentMeta]:
             filename    = info["filename"],
             page_count  = max(info["pages"]) if info["pages"] else 0,
             chunk_count = info["chunks"],
+            doc_type    = info["doc_type"],
         )
         for did, info in doc_map.items()
     ]

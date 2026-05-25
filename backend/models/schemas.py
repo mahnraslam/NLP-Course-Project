@@ -18,6 +18,7 @@ class QueryRequest(BaseModel):
     question: str
     doc_ids: Optional[List[str]] = None
     top_k: int = 5
+    visual: bool = False   # When True, retrieved page images are passed to Gemini Vision
 
 class Citation(BaseModel):
     doc_id: str
@@ -25,6 +26,7 @@ class Citation(BaseModel):
     page_num: int
     chunk_text: str
     relevance_score: float = 0.0
+    image_url: Optional[str] = None   # e.g. "/pages/{doc_id}_page_{n}.png"
 
 class QueryResponse(BaseModel):
     question: str

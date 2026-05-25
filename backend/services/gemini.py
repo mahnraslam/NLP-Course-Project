@@ -70,6 +70,51 @@ def generate_json(prompt: str) -> str:
     return cleaned.strip()
 
 
+def generate_with_images(prompt: str, image_paths: list[str]) -> str:
+    """
+    Multimodal generation: send text prompt together with one or more page
+    images so Gemini can *see* the drawings when formulating its answer.
+
+    Called at query time (not just ingestion time) so the model can reason
+    about dimensions, annotations, and graphical content that text extraction
+    alone misses.
+
+    image_paths: absolute filesystem paths to pre-rendered PNG pages.
+    Non-existent paths are silently skipped so a missing render never blocks
+    an answer.
+    """
+    content: list = []
+
+    loaded = 0
+    for path in image_paths:
+        if not os.path.exists(path):
+            logger.warning(f"[gemini] Image not found, skipping: {path}")
+            continue
+        try:
+            with open(path, "rb") as f:
+                data = base64.b64encode(f.read()).decode("utf-8")
+            content.append({"mime_type": "image/png", "data": data})
+            loaded += 1
+        except Exception as e:
+            logger.warning(f"[gemini] Could not load image {path}: {e}")
+
+    if loaded == 0:
+        logger.warning("[gemini] generate_with_images: no images loaded, falling back to text-only")
+        return generate(prompt)
+
+    content.append(prompt)
+
+    try:
+        logger.info(f"[gemini] Multimodal generation with {loaded} page image(s)")
+        response = _model.generate_content(content)
+        return response.text
+    except Exception as e:
+        logger.error(f"[gemini] Multimodal generation failed: {e}")
+        # Degrade gracefully to text-only rather than surfacing a raw error
+        logger.info("[gemini] Falling back to text-only generation")
+        return generate(prompt)
+
+
 def describe_blueprint_page(image_path: str) -> str:
     """
     Vision call: extract technical information from a blueprint page image.
